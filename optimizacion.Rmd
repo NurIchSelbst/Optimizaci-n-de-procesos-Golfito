@@ -28,6 +28,251 @@ library(SixSigma)
 
 
 
+## Definición de funciones a utilizar
+
+```{r}
+# Resumen de estadísticos 
+tabla_estadisticos <- function(df, grupo_var) {
+  df %>%
+    filter(!is.na(valor)) %>%
+    group_by(across(all_of(grupo_var))) %>%
+    summarise(
+      n             = n(),
+      Media         = mean(valor),
+      Mediana       = median(valor),
+      Desv_Std      = sd(valor),
+      Coef_Variacion = (sd(valor) / mean(valor)) * 100,
+      .groups = "drop"
+    ) %>%
+    kable(
+      caption = paste("Resumen Estadístico por", grupo_var),
+      digits  = 2,
+      align   = "c",
+      booktabs = TRUE
+    ) %>%
+    kable_styling(
+      bootstrap_options = c("striped", "condensed", "hover"),
+      full_width = FALSE
+    )
+}
+```
+
+
+```{r}
+# Histogramas de densidad
+
+plot_histograma <- function(df, fill_var, titulo, subtitulo = NULL) {
+  df %>%
+    filter(!is.na(valor)) %>%
+    ggplot(aes(x = valor, fill = .data[[fill_var]])) +
+    geom_histogram(
+      aes(y = after_stat(density)),
+      binwidth = 10, color = "white", alpha = 0.5
+    ) +
+    geom_density(alpha = 0.2, color = "black", linewidth = 0.8) +
+    geom_vline(xintercept = TARGET, linetype = "dashed", color = "red",   linewidth = 1) +
+    geom_vline(xintercept = c(LCI, LCS), linetype = "dotted", color = "black", linewidth = 0.7) +
+    facet_wrap(~ .data[[fill_var]]) +
+    labs(
+      title    = titulo,
+      subtitle = subtitulo %||% paste("Distribución por", fill_var, "| Objetivo:", TARGET, "cm ±10"),
+      x        = "Distancia Recorrida (cm)",
+      y        = "Densidad",
+      fill     = fill_var,
+      caption  = "Línea roja: objetivo | Líneas negras: límites de especificación"
+    ) +
+    theme_minimal() +
+    theme(legend.position = "bottom", panel.grid.minor = element_blank())
+}
+```
+
+```{r}
+# Boxplot con JITTER
+plot_boxplot <- function(df, x_var, titulo, subtitulo = NULL) {
+  df %>%
+    filter(!is.na(valor)) %>%
+    ggplot(aes(x = .data[[x_var]], y = valor, fill = .data[[x_var]])) +
+    geom_boxplot(outlier.colour = "red", outlier.shape = 8, outlier.size = 3) +
+    geom_jitter(width = 0.2, alpha = 0.3) +
+    geom_hline(yintercept = TARGET, linetype = "dashed",  color = "darkgreen", linewidth = 1) +
+    geom_hline(yintercept = c(LCI, LCS), linetype = "dotted", color = "red", linewidth = 1) +
+    labs(
+      title    = titulo,
+      subtitle = subtitulo %||% "Línea verde: Objetivo | Líneas rojas: Límites de Tolerancia",
+      x        = x_var,
+      y        = "Distancia Recorrida (cm)",
+      caption  = "Asteriscos rojos: valores atípicos"
+    ) +
+    theme_minimal() +
+    theme(legend.position = "none")
+}
+```
+
+```{r}
+# Gráfico de evolución por intento
+plot_evolucion <- function(df, color_var, titulo, subtitulo = NULL) {
+  df %>%
+    filter(!is.na(valor)) %>%
+    group_by(intento, .data[[color_var]]) %>%
+    summarise(media_valor = mean(valor), .groups = "drop") %>%
+    ggplot(aes(x = intento, y = media_valor,
+               color = .data[[color_var]], group = .data[[color_var]])) +
+    geom_line(linewidth = 1.2) +
+    geom_point(size = 3) +
+    geom_hline(yintercept = TARGET, linetype = "dashed", color = "black", alpha = 0.5) +
+    annotate("text", x = 1, y = TARGET + 2, label = paste("Objetivo (", TARGET, "cm)"), hjust = 0) +
+    scale_x_continuous(breaks = 1:4) +
+    labs(
+      title    = titulo,
+      subtitle = subtitulo %||% "Promedio de lanzamientos por número de intento",
+      x        = "Número de Intento",
+      y        = "Distancia Promedio (cm)",
+      color    = color_var
+    ) +
+    theme_minimal() +
+    theme(legend.position = "bottom")
+}
+```
+
+```{r}
+# Capacidad de proceso
+tabla_capacidad <- function(df, grupo_var) {
+  df %>%
+    filter(!is.na(valor)) %>%
+    group_by(across(all_of(grupo_var))) %>%
+    summarise(
+      n        = n(),
+      Media    = mean(valor),
+      Desv_Std = sd(valor),
+      Cp       = (LCS - LCI) / (6 * sd(valor)),
+      Cpk      = min(
+        (LCS - mean(valor)) / (3 * sd(valor)),
+        (mean(valor) - LCI) / (3 * sd(valor))
+      ),
+      .groups = "drop"
+    ) %>%
+    arrange(desc(Cpk)) %>%
+    kable(
+      caption  = paste("Índices de Capacidad de Proceso por", grupo_var),
+      digits   = 3,
+      align    = "c",
+      booktabs = TRUE
+    ) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
+    column_spec(5, color = ifelse(
+      # Colorea Cpk: rojo < 1, naranja 1–1.33, verde ≥ 1.33
+      # (kableExtra no soporta lógica directa aquí; se deja como extensión futura)
+      TRUE, "black", "black"
+    ))
+}
+```
+
+```{r}
+# Gráficas X-barra y R
+plot_xbar_r <- function(df, titulo_prefijo = "Control del Proceso") {
+  matriz <- df %>%
+    filter(!is.na(valor)) %>%
+    mutate(subgrupo = paste(operador, ronda, sep = "_")) %>%
+    select(subgrupo, intento, valor) %>%
+    pivot_wider(names_from = intento, values_from = valor) %>%
+    select(-subgrupo) %>%
+    as.matrix()
+
+  qcc(matriz, type = "xbar",
+      center = TARGET,
+      title  = paste(titulo_prefijo, "— Gráfica X-bar"),
+      xlab   = "Subgrupos (Operador / Ronda)",
+      ylab   = "Promedio de Distancia (cm)")
+
+  qcc(matriz, type = "R",
+      title  = paste(titulo_prefijo, "— Gráfica R"),
+      xlab   = "Subgrupos (Operador / Ronda)",
+      ylab   = "Rango (cm)")
+}
+```
+
+```{r}
+# Anova entre grupos
+analisis_anova <- function(df, grupo_var) {
+  df_limpio <- df %>% filter(!is.na(valor))
+
+  formula_anova <- as.formula(paste("valor ~", grupo_var))
+  modelo        <- aov(formula_anova, data = df_limpio)
+
+  cat("\n### ANOVA:", grupo_var, "\n\n")
+  print(
+    summary(modelo)[[1]] %>%
+      as.data.frame() %>%
+      kable(caption = paste("ANOVA — Variable:", grupo_var), digits = 3, booktabs = TRUE) %>%
+      kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE)
+  )
+
+  p_valor <- summary(modelo)[[1]][["Pr(>F)"]][1]
+  if (!is.na(p_valor) && p_valor < 0.05) {
+    cat("\n**p <0.05 — Se aplica prueba post-hoc de Tukey:**\n\n")
+    print(TukeyHSD(modelo))
+  } else {
+    cat("\n*p ≥ 0.05 — No hay diferencias significativas entre grupos.*\n")
+  }
+}
+```
+
+El Ishikawa hay que hacerlo cada vez
+```{r}
+# Ishikawa
+plot_ishikawa <- function(efecto = "Variación > 10cm") {
+  grupos   <- c("Mano de Obra", "Maquinaria", "Materiales",
+                "Métodos", "Medición", "Medio Ambiente")
+  causas   <- list(
+    `Mano de Obra`    = c("Falta entrenamiento", "Torque inconsistente", "Fatiga"),
+    `Maquinaria`      = c("Desgaste martillo", "Impacto alto (Acero)", "Rebote (Goma)"),
+    `Materiales`      = c("Densidad variable", "Peso variable", "Elasticidad"),
+    `Métodos`         = c("Ángulo variable", "Posición en cuclillas", "Sin estándar"),
+    `Medición`        = c("Lectura manual", "Límites difusos", "Error de paralaje"),
+    `Medio Ambiente`  = c("Superficie rugosa", "Abultamientos", "Fricción variable")
+  )
+
+  ss.ceDiag(
+    effect   = efecto,
+    causes.gr = grupos,
+    causes   = causas,
+    main     = "Diagrama de Ishikawa",
+    sub      = paste("Análisis de causas:", efecto)
+  )
+}
+```
+
+```{r}
+# Tabla comparativa
+tabla_comparativa_sesiones <- function(lista_sesiones) {
+  purrr::imap_dfr(lista_sesiones, function(df, nombre_sesion) {
+    df %>%
+      filter(!is.na(valor)) %>%
+      summarise(
+        Sesión    = nombre_sesion,
+        n         = n(),
+        Media     = mean(valor),
+        Desv_Std  = sd(valor),
+        Cp        = (LCS - LCI) / (6 * sd(valor)),
+        Cpk       = min(
+          (LCS - mean(valor)) / (3 * sd(valor)),
+          (mean(valor) - LCI) / (3 * sd(valor))
+        )
+      )
+  }) %>%
+    kable(
+      caption  = "Evolución de Capacidad de Proceso entre Sesiones",
+      digits   = 3,
+      align    = "c",
+      booktabs = TRUE
+    ) %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+}
+```
+
+
+
+
 # Introducción y Metodología de Optimización
 
 
@@ -89,425 +334,238 @@ TARGET <- 130
 ```
 
 
-
-```{r}
-# Dataframe sin comentarios cualitativos
-resultados_operadores <- data.frame(
+```{r datos-sesion1}
+df_s1 <- data.frame(
   operador = rep(paste("Operador", 1:5), each = 16),
-  ronda = rep(rep(c("Ronda 1", "Ronda 2"), each = 8), 5),
-  intento = rep(rep(1:4, each = 2), 10),
+  ronda    = rep(rep(c("Ronda 1", "Ronda 2"), each = 8), 5),
+  intento  = rep(rep(1:4, each = 2), 10),
   estacion = rep(c("Estación 1", "Estación 2"), 40),
-  # Valores extraídos de la tabla (en orden por operador, ronda, intento y estación)
-  valor = c(
+  valor    = c(
     # Operador 1
-    233, 176, 128.5, 145, Inf, 142, 79, 169, 134, 132, 149, 131.5, 61, 102, 148, 123.5,
+    233, 176, 128.5, 145, NA, 142, 79, 169,
+    134, 132, 149, 131.5, 61, 102, 148, 123.5,
     # Operador 2
-    135.5, 115, 158, 141, 120, 131, 153, 130.8, 132, 92.5, 155.5, 113, 157, 131, 115, 123.5,
+    135.5, 115, 158, 141, 120, 131, 153, 130.8,
+    132, 92.5, 155.5, 113, 157, 131, 115, 123.5,
     # Operador 3
-    154, 105, 120, 129.5, 128.5, 131, 126, 129, 115, 119.5, 121.5, 110, 157, 96, 132, 95.5,
+    154, 105, 120, 129.5, 128.5, 131, 126, 129,
+    115, 119.5, 121.5, 110, 157, 96, 132, 95.5,
     # Operador 4
-    81, 112, 150, 130, 129.5, 107, 119, 130.5, 82, 132, 150, 134, 145, 122.5, 110, 135,
+    81, 112, 150, 130, 129.5, 107, 119, 130.5,
+    82, 132, 150, 134, 145, 122.5, 110, 135,
     # Operador 5
-    144.5, 124.5, 129, 138.5, Inf, 123, 131, 121, 133.5, 100.5, 104, 121, 122, 113.5, 157, 132
+    144.5, 124.5, 129, 138.5, NA, 123, 131, 121,
+    133.5, 100.5, 104, 121, 122, 113.5, 157, 132
   )
 )
 ```
 
-
-```{r}
-# Dataframe con comentarios cualitativos
-comentarios_operadores <- data.frame(
-  operador = rep(paste("Operador", 1:5), each = 16),
-  ronda = rep(rep(c("Ronda 1", "Ronda 2"), each = 8), 5),
-  intento = rep(rep(1:4, each = 2), 10),
-  estacion = rep(c("Estación 1", "Estación 2"), 40),
+```{r comentarios-sesion1}
+df_s1_comentarios <- data.frame(
+  operador  = rep(paste("Operador", 1:5), each = 16),
+  ronda     = rep(rep(c("Ronda 1", "Ronda 2"), each = 8), 5),
+  intento   = rep(rep(1:4, each = 2), 10),
+  estacion  = rep(c("Estación 1", "Estación 2"), 40),
   comentario = c(
     # Operador 1
-    "Se desvió, salió del límite", "Estiró demasiado el martillo", "Ajustó la fuerza", "Ajustó tiro", "Se pasó demasiado", "Ajustó fuerza", "Poca fuerza", "Latigueó la cuerda del martillo", "Ajustó la fuerza", "Acomodó el martillo", "Se pasó, lo regresó el borde", "Se desvió poco el tiro", "Poca fuerza, se acomodó en cuclillas", "Poca fuerza", "Se pasó, lo regresó el borde", "Ajustó tiro, inclinó hacia la derecha la cadena",
+    "Se desvió, salió del límite", "Estiró demasiado el martillo",
+    "Ajustó la fuerza", "Ajustó tiro",
+    "Se pasó demasiado", "Ajustó fuerza",
+    "Poca fuerza", "Latigueó la cuerda del martillo",
+    "Ajustó la fuerza", "Acomodó el martillo",
+    "Se pasó, lo regresó el borde", "Se desvió poco el tiro",
+    "Poca fuerza, se acomodó en cuclillas", "Poca fuerza",
+    "Se pasó, lo regresó el borde", "Ajustó tiro, inclinó hacia la derecha la cadena",
     # Operador 2
-    "Ajustó tiro, se apoyó de varilla", "No estiró lo suficiente el martillo", "Se pasó, estiró demasiado", "Aumentó fuerza", "Ajustó fuerza", "Ajustó fuerza", "Se pasó, lo regresó el borde", "Se apoyó en la varilla", "Ajustó fuerza", "Poca fuerza, estiró poco", "Se pasó de fuerza", "Ajustó, faltó fuerza", "Acomodó martillo", "Acomodó martillo", "Disminuyó fuerza, quedó corto", "Estiró menos la cadena",
+    "Ajustó tiro, se apoyó de varilla", "No estiró lo suficiente el martillo",
+    "Se pasó, estiró demasiado", "Aumentó fuerza",
+    "Ajustó fuerza", "Ajustó fuerza",
+    "Se pasó, lo regresó el borde", "Se apoyó en la varilla",
+    "Ajustó fuerza", "Poca fuerza, estiró poco",
+    "Se pasó de fuerza", "Ajustó, faltó fuerza",
+    "Acomodó martillo", "Acomodó martillo",
+    "Disminuyó fuerza, quedó corto", "Estiró menos la cadena",
     # Operador 3
-    "En cuclillas, mucha fuerza", "Falta fuerza", "En cuclillas, se guió con la varilla", "3 cm antes de la varilla", "En cuclillas, se guió con la varilla", "3 cm antes de la varilla", "En cuclillas, se guió con la varilla", "3 cm antes de la varilla", "En cuclillas, faltó fuerza", "Falto fuerza", "En cuclillas", "Falto fuerza", "En cuclillas, mucha fuerza", "Falto fuerza, el ajuste fue malo", "En cuclillas", "Faltó fuerza",
+    "En cuclillas, mucha fuerza", "Falta fuerza",
+    "En cuclillas, se guió con la varilla", "3 cm antes de la varilla",
+    "En cuclillas, se guió con la varilla", "3 cm antes de la varilla",
+    "En cuclillas, se guió con la varilla", "3 cm antes de la varilla",
+    "En cuclillas, faltó fuerza", "Falto fuerza",
+    "En cuclillas", "Falto fuerza",
+    "En cuclillas, mucha fuerza", "Falto fuerza, el ajuste fue malo",
+    "En cuclillas", "Faltó fuerza",
     # Operador 4
-    "Falto fuerza", "Falto fuerza", "Ajustó con la cadena", "Ajustó con la cadena", "Falto fuerza", "Falto fuerza", "Mal ajuste con la cadena", "Contó los elementos de la cadena", "En cuclillas, el ajuste fue malo", "12 elementos de la cadena", "En cuclillas, pegó con el borde del trayecto", "13 elementos de la cadena", "En cuclillas, mucha fuerza", "11 elementos de la cadena", "En cuclillas, faltó fuerza", "12 elementos de la cadena",
+    "Falto fuerza", "Falto fuerza",
+    "Ajustó con la cadena", "Ajustó con la cadena",
+    "Falto fuerza", "Falto fuerza",
+    "Mal ajuste con la cadena", "Contó los elementos de la cadena",
+    "En cuclillas, el ajuste fue malo", "12 elementos de la cadena",
+    "En cuclillas, pegó con el borde del trayecto", "13 elementos de la cadena",
+    "En cuclillas, mucha fuerza", "11 elementos de la cadena",
+    "En cuclillas, faltó fuerza", "12 elementos de la cadena",
     # Operador 5
-    "En cuclillas, mucha fuerza", "Falto fuerza", "En cuclillas, se guió con la varilla", "Falto fuerza", "La pelota viró", "Falto fuerza", "En cuclillas, se guió con la varilla", "Falto fuerza", "En cuclillas, contó elementos de la cadena", "Contó 6 elementos de la cadena", "En cuclillas, golpeó el borde", "Contó 10 elementos de la cadena", "En cuclillas, poca fuerza", "Contó 8 elementos de la cadena", "En cuclillas, mucha fuerza", "Contó 11 elementos de la cadena"
+    "En cuclillas, mucha fuerza", "Falto fuerza",
+    "En cuclillas, se guió con la varilla", "Falto fuerza",
+    "La pelota viró", "Falto fuerza",
+    "En cuclillas, se guió con la varilla", "Falto fuerza",
+    "En cuclillas, contó elementos de la cadena", "Contó 6 elementos de la cadena",
+    "En cuclillas, golpeó el borde", "Contó 10 elementos de la cadena",
+    "En cuclillas, poca fuerza", "Contó 8 elementos de la cadena",
+    "En cuclillas, mucha fuerza", "Contó 11 elementos de la cadena"
   )
 )
 ```
 
 
-
-```{r}
-df_resultados <- data.frame(
-  operador = rep(paste('Operador', 1:5), each = 16),
-  ronda = rep(rep(c('Ronda 1', 'Ronda 2'), each = 8), 5),
-  intento = rep(rep(1:4, each = 2), 10),
-  estacion = rep(c('Estación 1', 'Estación 2'), 40),
-  valor = c(233, 176, 128.5, 145, NA, 142, 79, 169, 134, 132, 149, 131.5, 61, 102, 148, 123.5, 
-            135.5, 115, 158, 141, 120, 131, 153, 130.8, 132, 92.5, 155.5, 113, 157, 131, 115, 123.5, 
-            154, 105, 120, 129.5, 128.5, 131, 126, 129, 115, 119.5, 121.5, 110, 157, 96, 132, 95.5, 
-            81, 112, 150, 130, 129.5, 107, 119, 130.5, 82, 132, 150, 134, 145, 122.5, 110, 135, 
-            144.5, 124.5, 129, 138.5, NA, 123, 131, 121, 133.5, 100.5, 104, 121, 122, 113.5, 157, 132)
+```{r s1-histograma-estaciones}
+plot_histograma(
+  df_s1,
+  fill_var   = "estacion",
+  titulo     = "Distribución por Estación de Trabajo",
+  subtitulo  = "Sesión 1 — Histograma de densidad vs. Objetivo (130 cm ±10)"
 )
-
-df_resultados %>%
-  pivot_wider(names_from = estacion, values_from = valor) %>%
-  kable(caption = 'Matriz de Resultados por Operador y Estación de Trabajo',
-        align = 'c', 
-        booktabs = TRUE) %>%
-  kable_styling(bootstrap_options = c('striped', 'hover', 'condensed', 'responsive'),
-                full_width = F, 
-                position = 'center',
-                font_size = 12) %>%
-  collapse_rows(columns = 1:2, valign = 'middle')
 ```
 
 
 
 
-
-```{r}
-# Histograma de las estaciones
-df_limpio <- df_resultados %>% filter(!is.na(valor)) # Se eliminan las NAs para un manejo más completo
-
-ggplot(df_limpio, aes(x = valor, fill = estacion)) +
-  geom_histogram(aes(y = ..density..), binwidth = 10, color = "white", alpha = 0.5) +
-  geom_density(alpha = 0.2, color = "black", size = 0.8) +
-  geom_vline(xintercept = 130, linetype = "dashed", color = "red", size = 1) +
-  geom_vline(xintercept = c(120, 140), linetype = "dotted", color = "black", size = 0.7) +
-  facet_wrap(~estacion) +
-  labs(
-    title = "Análisis de Distribución y Tendencia por Estación",
-    subtitle = "Histograma de densidad con curva de ajuste vs. Objetivo (130cm ±10)",
-    x = "Distancia Recorrida (cm)",
-    y = "Densidad",
-    fill = "Equipo"
-  ) +
-  theme_minimal() +
-  theme(
-    legend.position = "bottom",
-    panel.grid.minor = element_blank()
-  )
+```{r s1-boxplot-estaciones}
+plot_boxplot(
+  df_s1,
+  x_var   = "estacion",
+  titulo  = "Comparativa de Dispersión por Estación",
+  subtitulo = "Sesión 1 — Línea verde: objetivo | Líneas rojas: límites de tolerancia"
+)
 ```
 
 
 
-
-
-```{r}
-tabla_estadisticos <- df_resultados %>%
-  filter(!is.na(valor)) %>% # Se excluye todo lo que esté fuera de rango
-  group_by(estacion) %>%
-  summarise(
-    n = n(),
-    Media = mean(valor),
-    Mediana = median(valor),
-    Desv_Std = sd(valor),
-    Coef_Variacion = (sd(valor) / mean(valor)) * 100
-  )
+```{r s1-tabla-estaciones}
+tabla_estadisticos(df_s1, "estacion")
 ```
 
 
-```{r}
-tabla_estadisticos %>%
-  kable(caption = 'Resumen Estadístico Comparativo por Estación',
-        digits = 2, align = 'c', booktabs = TRUE) %>%
-  kable_styling(bootstrap_options = c('striped', 'condensed'), full_width = F)
-```
+
 
 
 
 Si bien el coeficiente de variación y la desviación estándar parecen ser menores en la estación 2, es relevante evaluar si estas diferencias ocurren a causar del operador o si es el mecanismo propio quien las ocasiona. Este resultado será observable si se muestran los resultados en función del tiempo, si los operadores fueron corrigiendo errores propios, entonces se debería notar una mejora en los lanzamientos. Si por el contrario es la maquinaria la que falla, entonces se entenderá que ésta es más propensa al error
 
-```{r}
-df_evolucion <- df_resultados %>%
-  filter(!is.na(valor)) %>%
-  group_by(intento, estacion) %>%
-  summarise(media_valor = mean(valor), .groups = 'drop')
 
-ggplot(df_evolucion, aes(x = intento, y = media_valor, color = estacion, group = estacion)) +
-  geom_line(size = 1.2) +
-  geom_point(size = 3) +
-  geom_hline(yintercept = 130, linetype = "dashed", color = "black", alpha = 0.5) +
-  annotate("text", x = 1, y = 132, label = "Objetivo (130cm)", hjust = 0) +
-  labs(
-    title = "Evolución del Desempeño: Estación 1 vs. Estación 2",
-    subtitle = "Promedio de lanzamientos por número de intento",
-    x = "Número de Intento",
-    y = "Distancia Promedio (cm)",
-    color = "Estación de Trabajo"
-  ) +
-  scale_x_continuous(breaks = 1:4) +
-  theme_minimal() +
-  theme(legend.position = "bottom")
+```{r s1-evolucion-estaciones}
+plot_evolucion(
+  df_s1,
+  color_var = "estacion",
+  titulo    = "Evolución del Desempeño: Estación 1 vs. Estación 2",
+  subtitulo = "Sesión 1 — Promedio de lanzamientos por número de intento"
+)
 ```
 
 A juzgar por el gráfico, que la media de los intentos en la estación 1 busca estabilizarse cerca del objetivo, mientras que en el caso de la estación dos hay una variación mayor respecto a la distancia entre intentos. 
 
 
-```{r}
-df_boxplot <- df_resultados %>% filter(!is.na(valor))
-
-ggplot(df_boxplot, aes(x = estacion, y = valor, fill = estacion)) +
-  geom_boxplot(outlier.colour = "red", outlier.shape = 8, outlier.size = 3) +
-  geom_jitter(width = 0.2, alpha = 0.3) +
-  geom_hline(yintercept = 130, linetype = "dashed", color = "darkgreen", size = 1) +
-  geom_hline(yintercept = c(120, 140), linetype = "dotted", color = "red", size = 1) +
-  labs(
-    title = "Comparativa de Dispersión y Precisión por Estación",
-    subtitle = "Línea verde: Objetivo (130cm) | Líneas rojas: Límites de Tolerancia",
-    x = "Estación de Trabajo",
-    y = "Distancia Recorrida (cm)",
-    caption = "Nota: Los asteriscos rojos indican valores fuera de rango (outliers)."
-  ) +
-  theme_minimal() +
-  theme(legend.position = "none")
-```
-
 Algo de importancia es que hay una mayor cantidad de valores atípicos en la estación 1, estos parecen decrecer en el tiempo, en cambio, en la estación 2 los errores permanecen, por lo que podría ser evidencia de que la propia máquina, y no los operadores, es la principal causante de estas inconsistencias.
 
-
-
-
-
-```{r}
-# --- SESIÓN 1: Visualización de Estabilidad por Intento ---
-
-ggplot(df_resultados, aes(x = intento, y = valor, color = estacion)) +
-  geom_point(alpha = 0.6, size = 2, position = position_jitter(width = 0.1)) +
-  geom_smooth(method = "loess", se = FALSE, size = 1) + # Línea de tendencia suavizada
-  geom_hline(yintercept = 130, linetype = "dashed", color = "black") +
-  facet_wrap(~estacion) +
-  labs(
-    title = "Estabilidad del Proceso: Corrección de Errores por Intento",
-    subtitle = "Comparativa de la convergencia hacia el objetivo (130cm)",
-    x = "Número de Intento",
-    y = "Distancia (cm)",
-    color = "Equipo"
-  ) +
-  theme_minimal()
+```{r s1-xbar-r, fig.width=9}
+df_s1 %>%
+  filter(estacion == "Estación 1") %>%
+  plot_xbar_r(titulo_prefijo = "Sesión 1 — Estación 1")
 ```
 
 
-
-
-```{r}
-str(df_resultados)
-```
 
 
 ### Análisis de operadores
 
-```{r}
-df_estacion1 <- df_resultados %>% filter(estacion == "Estación 1", !is.na(valor))
-```
 
-
-```{r}
-ggplot(df_estacion1, aes(x = valor)) +
-  geom_histogram(aes(y = ..density.., fill = operador), binwidth = 8, alpha = 0.4, color = "white") +
-  geom_density(aes(color = operador), size = 1) +
-  geom_vline(xintercept = 130, linetype = "dashed", color = "black", size = 0.8) +
-  geom_vline(xintercept = c(120, 140), linetype = "dotted", color = "red", size = 0.8) +
-  facet_wrap(~operador, ncol = 3) +
-  labs(
-    title = "Perfiles de Lanzamiento por Operador (Estación 1)",
-    subtitle = "La curva de densidad revela la consistencia técnica individual frente al objetivo (130cm)",
-    x = "Distancia (cm)",
-    y = "Densidad",
-    caption = "Líneas rojas punteadas: Límites de Especificación (±10cm)"
-  ) +
-  theme_minimal() +
-  theme(legend.position = "none", panel.spacing = unit(1, "lines"))
-```
-
-
-
-
-
-
-LCI 120
-```{r}
-tabla_capacidad_op <- df_estacion1 %>%
-  group_by(operador) %>%
-  summarise(
-    Media = mean(valor),
-    Desv_Std = sd(valor),
-    Cp = (LCS - LCI) / (6 * sd(valor)),
-    Cpk = min((LCS - mean(valor)) / (3 * sd(valor)), (mean(valor) - LCI) / (3 * sd(valor)))
-  ) %>%
-  arrange(desc(Cpk)) # Ordenamos del más capaz al menos capaz
-
-tabla_capacidad_op %>%
-  kable(caption = "Índices de Capacidad de Proceso por Operador", digits = 3) %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
-```
-
-
-
-
-```{r}
-matriz_control <- df_resultados %>%
+```{r s1-histograma-operadores}
+df_s1 %>%
   filter(estacion == "Estación 1") %>%
-  mutate(subgrupo = paste(operador, ronda, sep = "_")) %>%
-  select(subgrupo, intento, valor) %>%
-  pivot_wider(names_from = intento, values_from = valor) %>%
-  select(-subgrupo) %>%
-  as.matrix()
-
-
-# Gráfica X-barra
-qcc_xbar <- qcc(matriz_control, type = "xbar", 
-                center = 130, 
-                title = "Gráfica X-bar: Control de Medias (Estación 1)",
-                xlab = "Subgrupos (Operador/Ronda)",
-                ylab = "Promedio de Distancia (cm)")
-
-# Gráfica R
-qcc_r <- qcc(matriz_control, type = "R", 
-             title = "Gráfica R: Control de Dispersión (Estación 1)",
-             xlab = "Subgrupos (Operador/Ronda)",
-             ylab = "Rango (cm)")
-```
-
-
-
-
-
-```{r}
-df_materiales <- df_resultados %>%
-  filter(estacion == "Estación 1", !is.na(valor)) %>%
-  mutate(material = ifelse(ronda == "Ronda 1", "Pelota Blanca", "Pelota Amarilla"))
-```
-
-```{r}
-ggplot(df_materiales, aes(x = valor, fill = material)) +
-  geom_density(alpha = 0.5) +
-  geom_vline(xintercept = 130, linetype = "dashed", color = "black") +
-  geom_vline(xintercept = c(120, 140), linetype = "dotted", color = "red") +
-  labs(title = "Comportamiento del Proyectil: Blanca vs. Amarilla",
-       subtitle = "Análisis de precisión y centrado por tipo de material",
-       x = "Distancia (cm)", y = "Densidad", fill = "Material") +
-  theme_minimal()
-```
-
-
-```{r}
-prueba_t <- t.test(valor ~ material, data = df_materiales)
-
-# 4. Tabla de Resumen de Materiales
-resumen_materiales <- df_materiales %>%
-  group_by(material) %>%
-  summarise(
-    n = n(),
-    Media = mean(valor),
-    Desv_Std = sd(valor),
-    Error_Estandar = sd(valor) / sqrt(n()),
-    CV = (sd(valor) / mean(valor)) * 100
+  plot_histograma(
+    fill_var  = "operador",
+    titulo    = "Perfiles de Lanzamiento por Operador (Estación 1)",
+    subtitulo = "La curva de densidad revela la consistencia técnica individual"
   )
 ```
 
-```{r}
-resumen_materiales %>%
-  kable(caption = "Estadísticos Comparativos por Tipo de Proyectil", digits = 2) %>%
-  kable_styling(bootstrap_options = c("striped", "hover"))
+
+### Capacidad de proceso por operador
+
+```{r s1-capacidad-operadores}
+df_s1 %>%
+  filter(estacion == "Estación 1") %>%
+  tabla_capacidad("operador")
 ```
 
 
-```{r}
-df_interaccion <- df_materiales %>%
+
+### ANOVA: ¿difieren significativamente los operadores?
+
+```{r s1-anova-operadores}
+df_s1 %>%
+  filter(estacion == "Estación 1") %>%
+  analisis_anova("operador")
+```
+
+### 1.3 Análisis por Material (Estación 1)
+
+La Ronda 1 corresponde a la **Pelota Blanca** y la Ronda 2 a la **Pelota Amarilla**.
+
+```{r datos-materiales-s1}
+df_s1_mat <- df_s1 %>%
+  filter(estacion == "Estación 1") %>%
+  mutate(material = ifelse(ronda == "Ronda 1", "Pelota Blanca", "Pelota Amarilla"))
+```
+
+```{r s1-boxplot-materiales}
+plot_boxplot(
+  df_s1_mat,
+  x_var     = "material",
+  titulo    = "Dispersión por Tipo de Proyectil (Estación 1)",
+  subtitulo = "La Pelota Amarilla muestra mayor concentración cerca del objetivo"
+)
+```
+
+
+
+```{r s1-tabla-materiales}
+tabla_estadisticos(df_s1_mat, "material")
+```
+
+
+
+```{r s1-interaccion-operador-material}
+df_s1_mat %>%
   group_by(operador, material) %>%
-  summarise(media_distancia = mean(valor), .groups = 'drop')
-
-ggplot(df_interaccion, aes(x = material, y = media_distancia, color = operador, group = operador)) +
-  geom_line(size = 1) +
+  summarise(media_distancia = mean(valor, na.rm = TRUE), .groups = "drop") %>%
+  ggplot(aes(x = material, y = media_distancia, color = operador, group = operador)) +
+  geom_line(linewidth = 1) +
   geom_point(size = 3) +
-  geom_hline(yintercept = 130, linetype = "dashed", alpha = 0.5) +
-  labs(title = "Efecto de Interacción: Operador vs. Material",
-       subtitle = "Visualización de cómo cambia el desempeño según el proyectil usado",
-       x = "Tipo de Pelota",
-       y = "Distancia Promedio (cm)") +
+  geom_hline(yintercept = TARGET, linetype = "dashed", alpha = 0.5) +
+  labs(
+    title    = "Efecto de Interacción: Operador × Material",
+    subtitle = "Sesión 1 — Cómo cambia el desempeño según el proyectil",
+    x        = "Tipo de Pelota",
+    y        = "Distancia Promedio (cm)",
+    color    = "Operador"
+  ) +
   theme_minimal()
 ```
 
-```{r}
-# 1. Preparación de datos (Filtramos Estación 1)
-df_materiales <- df_resultados %>% 
-  filter(estacion == "Estación 1", !is.na(valor)) %>%
-  mutate(material = ifelse(ronda == "Ronda 1", "Pelota Blanca", "Pelota Amarilla"))
 
-# 2. Boxplot con Jitter para ver la consistencia real
-ggplot(df_materiales, aes(x = material, y = valor, fill = material)) +
-  geom_boxplot(alpha = 0.7, outlier.shape = NA) + # Ocultamos outliers del boxplot para no duplicar
-  geom_jitter(width = 0.2, alpha = 0.5, size = 2) +
-  geom_hline(yintercept = 130, linetype = "dashed", color = "red") +
-  labs(title = "Dispersión por Tipo de Proyectil",
-       subtitle = "La Pelota Amarilla muestra una agrupación más densa cerca del objetivo",
-       x = "Material", y = "Distancia (cm)") +
-  theme_minimal() +
-  theme(legend.position = "none")
 
-# 3. Cálculo del Coeficiente de Variación (CV)
-# CV = (Desviación Estándar / Media) * 100
-tabla_cv <- df_materiales %>%
-  group_by(material) %>%
-  summarise(
-    Media = mean(valor),
-    Desv_Std = sd(valor),
-    CV = (sd(valor) / mean(valor)) * 100
-  )
 
-print(tabla_cv)
+### ANOVA: ¿difiere el desempeño por material?
+
+```{r s1-anova-material}
+analisis_anova(df_s1_mat, "material")
 ```
 
+## 1.4 Análisis de Causas Raíz
 
-
-```{r}
-# 1. Definimos los grupos de causas
-grupos_causas <- c("Mano de Obra", "Maquinaria", "Materiales", 
-                   "Metodos", "Medicion", "Medio Ambiente")
-
-# 2. Creamos la lista de subcausas
-lista_subcausas <- list(
-  c("Falta entrenamiento", "Torque inconsistente", "Fatiga"),
-  c("Desgaste martillo", "Impacto alto (Acero)", "Rebote (Goma)"),
-  c("Densidad blanca", "Peso variable", "Elasticidad"),
-  c("Ángulo variable", "Posición cuclillas", "Sin estándar"),
-  c("Lectura manual", "Límites difusos", "Paralaje"),
-  c("Superficie rugosa", "Abultamientos", "Fricción")
-)
-
-# 3. CRÍTICO: Asignar los nombres de los grupos a la lista
-# Sin esto, las subcausas no se renderizan
-names(lista_subcausas) <- grupos_causas
-
-# 4. Renderizado
-ss.ceDiag(effect = "Variación > 10cm",
-          causes.gr = grupos_causas,
-          causes = lista_subcausas,
-          main = "Diagrama de Ishikawa",
-          sub = "Análisis de Variabilidad del Proyectil",
-          #ss.col = c("#1a5276", "#2980b9", "#5dade2", "#a9cce3", "#d4e6f1", "#FFFFFF", "#000000")
-)
+```{r s1-ishikawa, fig.width=10, fig.height=6}
+plot_ishikawa("Variación > 10cm — Sesión 1")
 ```
-
-```{r}
-# --- DÍA 1: Ranking Preliminar para Selección de Operadores ---
-
-# Analizamos solo la Estación 1 para ver quiénes son los candidatos más fuertes
-ranking_preliminar <- df_resultados %>%
-  filter(estacion == "Estación 1", !is.na(valor)) %>%
-  group_by(operador) %>%
-  summarise(
-    Precision = sd(valor), # Buscamos el SD más bajo
-    Exactitud = abs(130 - mean(valor)) # Buscamos el valor más cercano a 0
-  ) %>%
-  arrange(Precision, Exactitud)
-
-print(ranking_preliminar)
-```
-
 
 
 
