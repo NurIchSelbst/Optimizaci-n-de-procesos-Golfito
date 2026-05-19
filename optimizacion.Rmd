@@ -5,7 +5,7 @@ author: "José Salvador Balbuena González"
 date: "`r Sys.Date()`"
 output:
   rmdformats::robobook:
-    code_folding: show
+    code_folding: hide
     self_contained: true
 ---
 
@@ -30,8 +30,11 @@ library(SixSigma)
 
 ## Definición de funciones a utilizar
 
+El proceso presente se realizó un número importante de veces. Debido a esto, se considera más apropiada la creación de funciones para cada apartado, reduciendo así considerablemente las redundancias y el código a ejecutar. A continuación se presentan las funciones a utilizar. Un caso especial es el de los diagramas de Ishikawa, que sí repiten su código en cada apartado para mantener la coherencia de su formulación cualitativa.
+
+
+##### Resumen de estadísticos 
 ```{r}
-# Resumen de estadísticos 
 tabla_estadisticos <- function(df, grupo_var) {
   df %>%
     filter(!is.na(valor)) %>%
@@ -57,10 +60,8 @@ tabla_estadisticos <- function(df, grupo_var) {
 }
 ```
 
-
+##### Histogramas de densidad
 ```{r}
-# Histogramas de densidad
-
 plot_histograma <- function(df, fill_var, titulo, subtitulo = NULL) {
   df %>%
     filter(!is.na(valor)) %>%
@@ -86,8 +87,9 @@ plot_histograma <- function(df, fill_var, titulo, subtitulo = NULL) {
 }
 ```
 
+
+##### Boxplot con JITTER
 ```{r}
-# Boxplot con JITTER
 plot_boxplot <- function(df, x_var, titulo, subtitulo = NULL) {
   df %>%
     filter(!is.na(valor)) %>%
@@ -108,8 +110,9 @@ plot_boxplot <- function(df, x_var, titulo, subtitulo = NULL) {
 }
 ```
 
+
+##### Gráfico de evolución por intento
 ```{r}
-# Gráfico de evolución por intento
 plot_evolucion <- function(df, color_var, titulo, subtitulo = NULL) {
   df %>%
     filter(!is.na(valor)) %>%
@@ -134,10 +137,11 @@ plot_evolucion <- function(df, color_var, titulo, subtitulo = NULL) {
 }
 ```
 
+
+##### Índices de capacidad del proceso
 ```{r}
-# Capacidad de proceso
 tabla_capacidad <- function(df, grupo_var) {
-  df %>%
+  resumen <- df %>%
     filter(!is.na(valor)) %>%
     group_by(across(all_of(grupo_var))) %>%
     summarise(
@@ -151,7 +155,15 @@ tabla_capacidad <- function(df, grupo_var) {
       ),
       .groups = "drop"
     ) %>%
-    arrange(desc(Cpk)) %>%
+    arrange(desc(Cpk))
+
+  colores_cpk <- case_when(
+    resumen$Cpk >= 1.33 ~ "forestgreen",
+    resumen$Cpk >= 1.00 ~ "darkorange",
+    TRUE                ~ "red"
+  )
+
+  resumen %>%
     kable(
       caption  = paste("Índices de Capacidad de Proceso por", grupo_var),
       digits   = 3,
@@ -159,16 +171,13 @@ tabla_capacidad <- function(df, grupo_var) {
       booktabs = TRUE
     ) %>%
     kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE) %>%
-    column_spec(5, color = ifelse(
-      # Colorea Cpk: rojo < 1, naranja 1–1.33, verde ≥ 1.33
-      # (kableExtra no soporta lógica directa aquí; se deja como extensión futura)
-      TRUE, "black", "black"
-    ))
+    column_spec(5, color = colores_cpk)
 }
 ```
 
+
+##### Gráficas X-barra y R
 ```{r}
-# Gráficas X-barra y R
 plot_xbar_r <- function(df, titulo_prefijo = "Control del Proceso") {
   matriz <- df %>%
     filter(!is.na(valor)) %>%
@@ -191,8 +200,10 @@ plot_xbar_r <- function(df, titulo_prefijo = "Control del Proceso") {
 }
 ```
 
+
+
+##### Anova entre grupos
 ```{r}
-# Anova entre grupos
 analisis_anova <- function(df, grupo_var) {
   df_limpio <- df %>% filter(!is.na(valor))
 
@@ -217,33 +228,10 @@ analisis_anova <- function(df, grupo_var) {
 }
 ```
 
-El Ishikawa hay que hacerlo cada vez
-```{r}
-# Ishikawa
-plot_ishikawa <- function(efecto = "Variación > 10cm") {
-  grupos   <- c("Mano de Obra", "Maquinaria", "Materiales",
-                "Métodos", "Medición", "Medio Ambiente")
-  causas   <- list(
-    `Mano de Obra`    = c("Falta entrenamiento", "Torque inconsistente", "Fatiga"),
-    `Maquinaria`      = c("Desgaste martillo", "Impacto alto (Acero)", "Rebote (Goma)"),
-    `Materiales`      = c("Densidad variable", "Peso variable", "Elasticidad"),
-    `Métodos`         = c("Ángulo variable", "Posición en cuclillas", "Sin estándar"),
-    `Medición`        = c("Lectura manual", "Límites difusos", "Error de paralaje"),
-    `Medio Ambiente`  = c("Superficie rugosa", "Abultamientos", "Fricción variable")
-  )
 
-  ss.ceDiag(
-    effect   = efecto,
-    causes.gr = grupos,
-    causes   = causas,
-    main     = "Diagrama de Ishikawa",
-    sub      = paste("Análisis de causas:", efecto)
-  )
-}
-```
 
+##### Tabla comparativa
 ```{r}
-# Tabla comparativa
 tabla_comparativa_sesiones <- function(lista_sesiones) {
   purrr::imap_dfr(lista_sesiones, function(df, nombre_sesion) {
     df %>%
@@ -273,7 +261,7 @@ tabla_comparativa_sesiones <- function(lista_sesiones) {
 
 
 
-# Introducción y Metodología de Optimización
+## Introducción 
 
 
 Con el propósito de mostrar el tipo de trabajo realizado y del cual se posee experiencia, se realiza una simulación del mismo utilizando datos obtenidos a través de un conjunto de actividades. Se trata de un proceso donde se lanza una pelota utilizando un martillo que cuelga de un mecanismo. Cinco participantes realizan este lanzamiento con libertad para operar el martillo como deseen.
@@ -284,16 +272,11 @@ Se realizaron cuatro sesiones de la misma actividad. En cada caso el proceso fue
 
 Se muestra cada sesión en un apartado diferente para su lectura más efectiva.
 
-
-## Primera sesión
-
-### Análisis de Variabilidad y Control Estadístico de Procesos: Simulación de Precisión
-
 Este análisis evalúa la eficiencia operativa y la variabilidad de un sistema de lanzamiento de precisión mediante una metodología de control estadístico. El objetivo primordial es determinar el material óptimo para el cumplimiento de tolerancias específicas establecidas por estándares externos. 
 
 El estudio compara el desempeño de dos estaciones de trabajo con configuraciones mecánicas distintas, operadas bajo condiciones variables, para identificar factores críticos que inciden en la repetibilidad y reproducibilidad del proceso.
 
-A través de este diagnóstico, se identificaron áreas de oportunidad que requieren una reestructuración del proceso para mitigar variables externas. Como resultado preliminar, se ha seleccionado la pelota de baja densidad (amarilla) como el estándar operativo para futuras implementaciones debido a su comportamiento predictivo.
+A través de este diagnóstico, se identificaron áreas de oportunidad que requieren una reestructuración del proceso para mitigar variables externas. Los análisis estadísticos realizados, particularmente el ANOVA, no encontraron diferencias significativas entre los dos proyectiles evaluados. No obstante, dado que una de las propuestas de mejora consiste en estandarizar el proceso a un único material, la selección del proyectil se resuelve por criterios operativos: se elige el proyectil amarillo por su menor coeficiente de variación descriptivo, a la espera de confirmación en sesiones posteriores.
 
 El análisis emplea las siguientes herramientas de calidad:
 
@@ -303,9 +286,9 @@ El análisis emplea las siguientes herramientas de calidad:
 
 
 
-### Metodología y Entorno Experimental
+### Metodología y entorno experimental
 
-#### Configuración del Equipo
+#### Configuración del equipo
 Se implementaron dos estaciones de trabajo denominadas Estación 1 (Martillo de Acero) y Estación 2 (Martillo de Goma):
 
 - Estación 1: Utiliza un percutor de mayor masa y área de contacto reducida, con un punto de impacto superior al centro de gravedad del proyectil.
@@ -334,6 +317,13 @@ TARGET <- 130
 ```
 
 
+
+## Primera sesión
+
+### Análisis de Variabilidad y Control Estadístico de Procesos: Simulación de Precisión
+
+
+Inicialmente, se vacían los datos en dos dataframes distintos para un uso más limpio. Primero, un dataframe que cuenta únicamente con los valores de las distancias de cada tiro, luego uno únicamente con los comentarios realizados en el caso de cada uno de estos tiros. Debido a restricciones de tiempo, para sesiones siguientes no se contará con un análisis tiro a tiro, sino con los resultados obtenidos en conversaciones posteriores en lluvias de ideas y otros ejercicios usualmente utilizados en Lean.
 ```{r datos-sesion1}
 df_s1 <- data.frame(
   operador = rep(paste("Operador", 1:5), each = 16),
@@ -426,7 +416,7 @@ plot_histograma(
 )
 ```
 
-
+En un primer momento se puede pensar que la estación 2 es la mejor opción, pues es en esta donde menos valores atípicos existen, y donde la mayor parte de los resultados se centran en la media. Sin embargo, como se verá más adelante, esto no necesariamente es el caso, con lo que se remarca el riesgo de tomar estadísticos sencillos para tomar decisiones.
 
 
 ```{r s1-boxplot-estaciones}
@@ -438,16 +428,11 @@ plot_boxplot(
 )
 ```
 
-
+Un diagrama de caja sostiene la evidencia de que lo ideal es mantener la estación 2 y dejar de utilizar la estación 1.
 
 ```{r s1-tabla-estaciones}
 tabla_estadisticos(df_s1, "estacion")
 ```
-
-
-
-
-
 
 Si bien el coeficiente de variación y la desviación estándar parecen ser menores en la estación 2, es relevante evaluar si estas diferencias ocurren a causar del operador o si es el mecanismo propio quien las ocasiona. Este resultado será observable si se muestran los resultados en función del tiempo, si los operadores fueron corrigiendo errores propios, entonces se debería notar una mejora en los lanzamientos. Si por el contrario es la maquinaria la que falla, entonces se entenderá que ésta es más propensa al error
 
@@ -461,7 +446,7 @@ plot_evolucion(
 )
 ```
 
-A juzgar por el gráfico, que la media de los intentos en la estación 1 busca estabilizarse cerca del objetivo, mientras que en el caso de la estación dos hay una variación mayor respecto a la distancia entre intentos. 
+Es a partir de la evaluación de desempeño donde el panorama comienza a cambiar. A juzgar por el gráfico, la media de los intentos en la estación 1 busca estabilizarse cerca del objetivo, mientras que en el caso de la estación dos hay una variación mayor respecto a la distancia entre intentos. 
 
 
 Algo de importancia es que hay una mayor cantidad de valores atípicos en la estación 1, estos parecen decrecer en el tiempo, en cambio, en la estación 2 los errores permanecen, por lo que podría ser evidencia de que la propia máquina, y no los operadores, es la principal causante de estas inconsistencias.
@@ -472,7 +457,11 @@ df_s1 %>%
   plot_xbar_r(titulo_prefijo = "Sesión 1 — Estación 1")
 ```
 
+Un aspecto a tomar en consideración es que variabilidad en el tamaño de las muestras puede afectar sensiblemene el análisis de la tabla $\bar{X}R$. La biblioteca `qcc` es capaz de manejar este problema, por lo que no influye en lo que se muestra en el resultado. 
 
+Por otro lado, esta tendencia a aproximarse al objetivo en la estación 1 se ve más claramente en las tablas $\bar{X}$ y $\bar{X}R$. Si bien en ambos casos hay una progresión hacia el objetivo, en la estación 1 el proceso siempre está en control, mienras que para el caso de la estación 2 se comienza fuera de control, y luego las variaciones en cada ejecución, si bien se encuentran en control, siguen siendo muy fluctuantes.
+
+Esto da pie a pensar en una hipótesis importante: quizá sea parte del mejoramiento del proceso el dejar de usar la estación 2, pues pruebas más robustas comienzan a apuntar a este descenlace.
 
 
 ### Análisis de operadores
@@ -488,6 +477,8 @@ df_s1 %>%
   )
 ```
 
+Otra parte importante a analizar son los operadores, pues en cada caso es posible que uno de ellos, o varios, sesguen el desempeño del proceso. Una vista simple a éstos muestra que en el caso del operador 1 hay carencias importantes, mientras que en caso del operador 4 existen valores atípicos constantes que mueven la media. El resto de los operadores no parecen ocasionar un problema severo.
+
 
 ### Capacidad de proceso por operador
 
@@ -497,7 +488,7 @@ df_s1 %>%
   tabla_capacidad("operador")
 ```
 
-
+Sin embargo, cabe resaltar que incluso bajo esas condiciones, tanto el $c_p$ como el $c_{pk}$ determinan que el proceso no está en control.
 
 ### ANOVA: ¿difieren significativamente los operadores?
 
@@ -507,31 +498,34 @@ df_s1 %>%
   analisis_anova("operador")
 ```
 
-### 1.3 Análisis por Material (Estación 1)
+Un análisis ANOVA da una visión relativamente diferente, aunque predecible, el que solo uno de los operadores esté mostrando resultados tan profundamente diferentes implica que no hay diferencias apreciables entre éstos, y por tanto es posible que el desempeño del proceso se encuentre afectado principalmente por la máquina en la estación, o el proyectil que se utiliza.
 
-La Ronda 1 corresponde a la **Pelota Blanca** y la Ronda 2 a la **Pelota Amarilla**.
+### Análisis por Material (Estación 1)
+
+La ronda 1 corresponde al proyectil blanco y la ronda 2 al proyectil amarillo.
 
 ```{r datos-materiales-s1}
 df_s1_mat <- df_s1 %>%
   filter(estacion == "Estación 1") %>%
-  mutate(material = ifelse(ronda == "Ronda 1", "Pelota Blanca", "Pelota Amarilla"))
+  mutate(material = ifelse(ronda == "Ronda 1", "Proyectil blanco", "Proyectil amarillo"))
 ```
 
 ```{r s1-boxplot-materiales}
 plot_boxplot(
   df_s1_mat,
   x_var     = "material",
-  titulo    = "Dispersión por Tipo de Proyectil (Estación 1)",
-  subtitulo = "La Pelota Amarilla muestra mayor concentración cerca del objetivo"
+  titulo    = "Dispersión por tipo de proyectil (Estación 1)",
+  subtitulo = "El proyectil amarillo muestra mayor concentración cerca del objetivo"
 )
 ```
-
+Respecto a esto, parece que el tipo de proyectil en efecto tiene un efecto importante en el proceso, pues el proyectil blanco tiene valores atípicos extremos en un número mayor que en el caso del proyectil amarillo. Si bien para este primer punto en el proceso existe un número importante de estos, es interesante observar esta diferencia entre cada tipo de material.
 
 
 ```{r s1-tabla-materiales}
 tabla_estadisticos(df_s1_mat, "material")
 ```
 
+Incluso el coeficiente de variación parece apoyar la idea de que el proyectil blanco es menos eficiente que el amarillo.
 
 
 ```{r s1-interaccion-operador-material}
@@ -552,7 +546,7 @@ df_s1_mat %>%
   theme_minimal()
 ```
 
-
+El caso del operador 1 es particularmente interesante al evaluar el efecto de la interacción entre el operador y el material. Fuera de ello y un ligero cruce enre el operador 5 y el operador 3, el resultado es el esperado bajo la idea de que no son los operadores, sino el material del proyectil lo que más está afectando al desempeño del proceso.
 
 
 ### ANOVA: ¿difiere el desempeño por material?
@@ -561,16 +555,91 @@ df_s1_mat %>%
 analisis_anova(df_s1_mat, "material")
 ```
 
-## 1.4 Análisis de Causas Raíz
+Nuevamente, no aparecen diferencias significativas entre los distintos grupos en la prueba ANOVA, por lo que no hay razón para pensar que los operadores trabajan de manera significativamente distinta a causa del proyectil. Es decir, no parece que el desempeño de los operadores varíe con un mismo proyectil, pero sí parece haber cambios, en base a lo visto previamente, entre los tipos de proyectil.
+
+## Análisis de Causas Raíz
+
+```{r}
+# Ishikawa
+plot_ishikawa <- function(efecto = "Variación > 10cm") {
+  grupos   <- c("Mano de Obra", "Maquinaria", "Materiales",
+                "Métodos", "Medición", "Medio Ambiente")
+  causas   <- list(
+    `Mano de Obra`    = c("Falta entrenamiento", "Torque inconsistente", "Fatiga"),
+    `Maquinaria`      = c("Desgaste martillo", "Impacto alto (Acero)", "Rebote (Goma)"),
+    `Materiales`      = c("Densidad variable", "Peso variable", "Elasticidad"),
+    `Métodos`         = c("Ángulo variable", "Posición en cuclillas", "Sin estándar"),
+    `Medición`        = c("Lectura manual", "Límites difusos", "Error de paralaje"),
+    `Medio Ambiente`  = c("Superficie rugosa", "Abultamientos", "Fricción variable")
+  )
+
+  ss.ceDiag(
+    effect   = efecto,
+    causes.gr = grupos,
+    causes   = causas,
+    main     = "Diagrama de Ishikawa",
+    sub      = paste("Análisis de causas:", efecto)
+  )
+}
+```
 
 ```{r s1-ishikawa, fig.width=10, fig.height=6}
 plot_ishikawa("Variación > 10cm — Sesión 1")
 ```
 
 
+Un diagrama de Ishikawa basado en una lluvia de ideas muestra las potenciales causas de error en el proceso. Estos se tratarán de solucionar antes de la segunda sesión de prueba del proceso.
 
 
 
+## Segunda sesión
+
+```{r}
+df_s2 <- data.frame(
+  operador = rep(paste("Operador", 1:5), each = 20),
+  ronda    = rep(rep(c("Ronda 1", "Ronda 2"), each = 10), 5),
+  intento  = rep(rep(1:5, each = 2), 10),
+  estacion = rep(c("Estación 1", "Estación 2"), 50),
+  valor    = c(
+    # Operador 1 — Ronda 1
+    128, 82, 123, 96, 96, 94, 145, 135, 131, 123,
+    # Operador 1 — Ronda 2
+    143.5, 117, 137.5, 150.5, 142.5, 141.5, 140, 139.5, 126, 125,
+    # Operador 2 — Ronda 1
+    132, 103, 152, 117, 126, 135, 108, 106, 135, 113,
+    # Operador 2 — Ronda 2
+    140, 157.5, 157.5, 137, 155, 135.5, 153.5, 135, 140, 133.5,
+    # Operador 3 — Ronda 1
+    125, 125, 115, 134, 138, 130, 133, 132, 147, 124,
+    # Operador 3 — Ronda 2
+    133.4, 117.5, 143.5, 105, 137.5, 131.5, 137.5, 114.5, 133.5, 126.9,
+    # Operador 4 — Ronda 1
+    151, 149.5, 148, 125, 132.5, 125, 127, 143.5, 133, 112,
+    # Operador 4 — Ronda 2
+    124, 135, 143, 123, 160, 109, 146, 135, 137, 132,
+    # Operador 5 — Ronda 1
+    131, 110, 130, 142, 121.5, 140, 131.5, 127.5, 116.5, 123,
+    # Operador 5 — Ronda 2
+    149.5, 120, 136, 142, 123.5, 147, 120, 131.5, 128, 125.5
+  )
+)
+```
+
+
+
+
+```{r s2-analisis, eval=FALSE}
+# Una vez cargados los datos, descomentar y ejecutar:
+
+# tabla_estadisticos(df_s2, "estacion")
+# plot_histograma(df_s2, "estacion", "Distribución por Estación — Sesión 2")
+# plot_boxplot(df_s2, "estacion", "Dispersión por Estación — Sesión 2")
+# plot_evolucion(df_s2, "estacion", "Evolución por Intento — Sesión 2")
+# df_s2 %>% filter(estacion == "Estación 1") %>% plot_xbar_r("Sesión 2 — Estación 1")
+# df_s2 %>% filter(estacion == "Estación 1") %>% tabla_capacidad("operador")
+# analisis_anova(df_s2 %>% filter(estacion == "Estación 1"), "operador")
+# plot_ishikawa("Variación > 10cm — Sesión 2")
+```
 
 
 
